@@ -104,7 +104,7 @@ muse::audio::AudioResourceMetaList VstModulesRepository::instrumentModulesMeta()
 
     std::lock_guard lock(m_mutex);
 
-    return modulesMetaList(audioplugins::AudioPluginType::Instrument);
+    return modulesMetaList(PluginType::Instrument);
 }
 
 muse::audio::AudioResourceMetaList VstModulesRepository::fxModulesMeta() const
@@ -113,17 +113,23 @@ muse::audio::AudioResourceMetaList VstModulesRepository::fxModulesMeta() const
 
     std::lock_guard lock(m_mutex);
 
-    return modulesMetaList(audioplugins::AudioPluginType::Fx);
+    return modulesMetaList(PluginType::Fx);
 }
 
 void VstModulesRepository::refresh()
 {
 }
 
-muse::audio::AudioResourceMetaList VstModulesRepository::modulesMetaList(const audioplugins::AudioPluginType& type) const
+muse::audio::AudioResourceMetaList VstModulesRepository::modulesMetaList(PluginType type) const
 {
     auto infoAccepted = [type](const audioplugins::AudioPluginInfo& info) {
-        return info.type == type && info.meta.type == muse::audio::AudioResourceType::VstPlugin && info.enabled;
+        if (!muse::audio::isResourceType(info.meta, muse::audio::AudioResourceType::VstPlugin)
+            || info.state != audioplugins::AudioPluginState::Validated) {
+            return false;
+        }
+        const String& categories = info.meta.attributeVal(muse::vst::CATEGORIES_ATTRIBUTE);
+        const bool isInstrument = categories.contains(muse::vst::INSTRUMENT_CATEGORY);
+        return type == PluginType::Instrument ? isInstrument : !isInstrument;
     };
 
     audioplugins::AudioPluginInfoList infoList = knownPlugins()->pluginInfoList(infoAccepted);

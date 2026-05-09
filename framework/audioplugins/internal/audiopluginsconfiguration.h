@@ -37,5 +37,11 @@ public:
         : Contextable(iocCtx) {}
 
     io::path_t knownAudioPluginsFilePath() const override;
+
+    const AudioResourceAttributes& runtimeAttributeDefaults() const override;
+    void setRuntimeAttributeDefaults(const AudioResourceAttributes& defaults) override;
+
+private:
+    AudioResourceAttributes m_runtimeAttributeDefaults;
 };
 }

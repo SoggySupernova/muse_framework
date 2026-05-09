@@ -24,30 +24,19 @@
 
 #include "global/serialization/json.h"
 
-#include "audio/common/audiotypes.h"
-#include "audiopluginsutils.h"
-
 #include "log.h"
 
 using namespace muse;
 using namespace muse::audioplugins;
-using namespace muse::audio;
 
 namespace muse::audioplugins {
-static const std::map<audio::AudioResourceType, std::string> RESOURCE_TYPE_TO_STRING_MAP {
-    { audio::AudioResourceType::VstPlugin, "VstPlugin" },
-    { audio::AudioResourceType::Lv2Plugin, "Lv2Plugin" },
-    { audio::AudioResourceType::AudioUnit, "AudioUnit" },
-    { audio::AudioResourceType::NyquistPlugin, "NyquistPlugin" },
-    { audio::AudioResourceType::NativeEffect, "NativeEffect" },
-};
-
-static JsonObject attributesToJson(const AudioResourceAttributes& attributes)
+static JsonObject attributesToJson(const AudioResourceAttributes& attributes,
+                                   const AudioResourceAttributes& runtimeOnly)
 {
     JsonObject result;
 
     for (auto it = attributes.cbegin(); it != attributes.cend(); ++it) {
-        if (it->first == audio::PLAYBACK_SETUP_DATA_ATTRIBUTE) {
+        if (runtimeOnly.find(it->first) != runtimeOnly.cend()) {
             continue;
         }
 
@@ -57,19 +46,18 @@ static JsonObject attributesToJson(const AudioResourceAttributes& attributes)
     return result;
 }
 
-static JsonObject metaToJson(const AudioResourceMeta& meta)
+static JsonObject metaToJson(const AudioResourceMeta& meta, const AudioResourceAttributes& runtimeOnly)
 {
     JsonObject result;
 
     result.set("id", meta.id);
-    result.set("type", muse::value(RESOURCE_TYPE_TO_STRING_MAP, meta.type, "Undefined"));
-    result.set("hasNativeEditorSupport", meta.hasNativeEditorSupport);
+    result.set("type", meta.type);
 
     if (!meta.vendor.empty()) {
         result.set("vendor", meta.vendor);
     }
 
-    JsonObject attributesJson = attributesToJson(meta.attributes);
+    JsonObject attributesJson = attributesToJson(meta.attributes, runtimeOnly);
     if (!attributesJson.empty()) {
         result.set("attributes", attributesJson);
     }
@@ -93,9 +81,8 @@ static AudioResourceMeta metaFromJson(const JsonObject& object)
     AudioResourceMeta result;
 
     result.id = object.value("id").toStdString();
-    result.type = muse::key(RESOURCE_TYPE_TO_STRING_MAP, object.value("type").toStdString());
+    result.type = object.value("type").toStdString();
     result.vendor = object.value("vendor").toStdString();
-    result.hasNativeEditorSupport = object.value("hasNativeEditorSupport").toBool();
 
     JsonValue attributes = object.value("attributes");
     if (attributes.isObject()) {
@@ -122,27 +109,72 @@ Ret KnownAudioPluginsRegister::load()
 
     RetVal<ByteArray> file = fileSystem()->readFile(knownAudioPluginsPath);
     if (!file.ret) {
+        LOGE() << "Failed to read known-audio-plugins cache "
+               << knownAudioPluginsPath << ": " << file.ret.toString();
         return file.ret;
     }
 
     std::string err;
     JsonDocument json = JsonDocument::fromJson(file.val, &err);
     if (!err.empty()) {
+        LOGE() << "Failed to parse known-audio-plugins cache "
+               << knownAudioPluginsPath << ": " << err;
         return Ret(static_cast<int>(Ret::Code::UnknownError), err);
     }
 
-    JsonArray array = json.rootArray();
+    JsonArray array;
+    int fileVersion = 0;
+
+    if (json.isArray()) {
+        // legacy format: bare array, treated as version 0
+        array = json.rootArray();
+    } else if (json.isObject()) {
+        JsonObject root = json.rootObject();
+        const JsonValue versionVal = root.value("version");
+        const JsonValue pluginsVal = root.value("plugins");
+        if (!versionVal.isNumber() || !pluginsVal.isArray()) {
+            LOGE() << "Malformed known-audio-plugins.json envelope at "
+                   << knownAudioPluginsPath << " (expected numeric \"version\" and array \"plugins\")";
+            return Ret(static_cast<int>(Ret::Code::UnknownError), "Malformed known_audio_plugins.json envelope");
+        }
+        fileVersion = versionVal.toInt();
+        array = pluginsVal.toArray();
+    } else {
+        LOGE() << "Unrecognized known-audio-plugins.json root type at "
+               << knownAudioPluginsPath << " (expected array or object)";
+        return Ret(static_cast<int>(Ret::Code::UnknownError), "Unrecognized known_audio_plugins.json root type");
+    }
+
+    Ret migrationRet = migrations()->migrate(fileVersion, CURRENT_KNOWN_AUDIO_PLUGINS_VERSION, array);
+    if (!migrationRet) {
+        LOGE() << "Failed to migrate known-audio-plugins cache from v" << fileVersion
+               << " to v" << CURRENT_KNOWN_AUDIO_PLUGINS_VERSION
+               << ": " << migrationRet.toString();
+        return migrationRet;
+    }
 
     for (size_t i = 0; i < array.size(); ++i) {
         JsonObject object = array.at(i).toObject();
 
         AudioPluginInfo info;
         info.meta = metaFromJson(object.value("meta").toObject());
-        info.meta.attributes.emplace(audio::PLAYBACK_SETUP_DATA_ATTRIBUTE, mpe::GENERIC_SETUP_DATA_STRING);
-        info.type = audioPluginTypeFromCategoriesString(info.meta.attributeVal(audio::CATEGORIES_ATTRIBUTE));
+        for (const auto& kv : configuration()->runtimeAttributeDefaults()) {
+            // Assign, don't emplace: runtime-only defaults must override any
+            // stale value a legacy cache still carries for the same key.
+            info.meta.attributes[kv.first] = kv.second;
+        }
         info.path = object.value("path").toString();
-        info.enabled = object.value("enabled").toBool();
+        info.state = audioPluginStateFromName(object.value("state").toStdString());
         info.errorCode = object.value("errorCode").toInt();
+
+        // `id` and `path` are the register's lookup keys — a row missing
+        // either (e.g. a truncated `meta`) would poison m_pluginInfoMap with
+        // an empty-key record. Reject the whole file, as with a bad envelope.
+        if (info.meta.id.empty() || info.path.empty()) {
+            LOGE() << "Malformed known-audio-plugins entry at "
+                   << knownAudioPluginsPath << " (missing id or path)";
+            return Ret(static_cast<int>(Ret::Code::UnknownError), "Malformed known_audio_plugins.json entry");
+        }
 
         m_pluginPaths.insert(info.path);
         m_pluginInfoMap.emplace(info.meta.id, std::move(info));
@@ -230,6 +262,34 @@ Ret KnownAudioPluginsRegister::registerPlugins(const AudioPluginInfoList& list)
     return make_ok();
 }
 
+Ret KnownAudioPluginsRegister::setPluginsState(const AudioResourceIdList& resourceIds, AudioPluginState state)
+{
+    IF_ASSERT_FAILED(m_loaded) {
+        return false;
+    }
+
+    if (resourceIds.empty()) {
+        return make_ok();
+    }
+
+    bool changed = false;
+    for (const AudioResourceId& resourceId : resourceIds) {
+        auto range = m_pluginInfoMap.equal_range(resourceId);
+        for (auto it = range.first; it != range.second; ++it) {
+            if (it->second.state != state) {
+                it->second.state = state;
+                changed = true;
+            }
+        }
+    }
+
+    if (!changed) {
+        return make_ok();
+    }
+
+    return writePluginsInfo();
+}
+
 Ret KnownAudioPluginsRegister::unregisterPlugins(const AudioResourceIdList& resourceIds)
 {
     IF_ASSERT_FAILED(m_loaded) {
@@ -264,19 +324,52 @@ Ret KnownAudioPluginsRegister::unregisterPlugins(const AudioResourceIdList& reso
     return make_ok();
 }
 
+Ret KnownAudioPluginsRegister::removePluginsAtPath(const io::path_t& path)
+{
+    IF_ASSERT_FAILED(m_loaded) {
+        return false;
+    }
+
+    bool removed = false;
+    for (auto it = m_pluginInfoMap.begin(); it != m_pluginInfoMap.end();) {
+        if (it->second.path == path) {
+            it = m_pluginInfoMap.erase(it);
+            removed = true;
+        } else {
+            ++it;
+        }
+    }
+
+    if (!removed) {
+        return make_ok();
+    }
+
+    muse::remove(m_pluginPaths, path);
+
+    return writePluginsInfo();
+}
+
 Ret KnownAudioPluginsRegister::writePluginsInfo()
 {
     TRACEFUNC;
 
     JsonArray array;
 
+    const AudioResourceAttributes& runtimeOnly = configuration()->runtimeAttributeDefaults();
+
     for (const auto& pair : m_pluginInfoMap) {
         const AudioPluginInfo& info = pair.second;
 
         JsonObject obj;
-        obj.set("meta", metaToJson(info.meta));
+        obj.set("meta", metaToJson(info.meta, runtimeOnly));
         obj.set("path", info.path.toStdString());
-        obj.set("enabled", info.enabled);
+
+        // Omit the state field for Undefined entries — a written entry always
+        // carries a concrete state. load() reads a missing "state" back as
+        // Undefined, so this round-trips.
+        if (info.state != AudioPluginState::Undefined) {
+            obj.set("state", audioPluginStateName(info.state));
+        }
 
         if (info.errorCode != 0) {
             obj.set("errorCode", info.errorCode);
@@ -285,8 +378,12 @@ Ret KnownAudioPluginsRegister::writePluginsInfo()
         array << obj;
     }
 
+    JsonObject root;
+    root.set("version", CURRENT_KNOWN_AUDIO_PLUGINS_VERSION);
+    root.set("plugins", array);
+
     io::path_t knownAudioPluginsPath = configuration()->knownAudioPluginsFilePath();
-    Ret ret = fileSystem()->writeFile(knownAudioPluginsPath, JsonDocument(array).toJson());
+    Ret ret = fileSystem()->writeFile(knownAudioPluginsPath, JsonDocument(root).toJson());
 
     return ret;
 }

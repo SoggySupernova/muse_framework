@@ -26,12 +26,14 @@
 #include "global/io/ifilesystem.h"
 
 #include "../iknownaudiopluginsregister.h"
+#include "../iknownaudiopluginsmigrationregister.h"
 #include "../iaudiopluginsconfiguration.h"
 
 namespace muse::audioplugins {
 class KnownAudioPluginsRegister : public IKnownAudioPluginsRegister
 {
     GlobalInject<IAudioPluginsConfiguration> configuration;
+    GlobalInject<IKnownAudioPluginsMigrationRegister> migrations;
     GlobalInject<io::IFileSystem> fileSystem;
 
     friend class AudioPlugins_KnownAudioPluginsRegisterTest;
@@ -44,19 +46,23 @@ public:
     AudioPluginInfoList pluginInfoList(PluginInfoAccepted accepted = PluginInfoAccepted()) const override;
     muse::async::Notification pluginInfoListChanged() const override;
 
-    const io::path_t& pluginPath(const audio::AudioResourceId& resourceId) const override;
+    const io::path_t& pluginPath(const AudioResourceId& resourceId) const override;
 
     bool exists(const io::path_t& pluginPath) const override;
-    bool exists(const audio::AudioResourceId& resourceId) const override;
+    bool exists(const AudioResourceId& resourceId) const override;
 
     Ret registerPlugins(const AudioPluginInfoList& list) override;
-    Ret unregisterPlugins(const audio::AudioResourceIdList& resourceIds) override;
+    Ret unregisterPlugins(const AudioResourceIdList& resourceIds) override;
+
+    Ret setPluginsState(const AudioResourceIdList& resourceIds, AudioPluginState state) override;
+
+    Ret removePluginsAtPath(const io::path_t& path) override;
 
 private:
     Ret writePluginsInfo();
     async::Notification m_pluginInfoListChanged;
     bool m_loaded = false;
-    std::multimap<audio::AudioResourceId, AudioPluginInfo> m_pluginInfoMap;
+    std::multimap<AudioResourceId, AudioPluginInfo> m_pluginInfoMap;
     std::set<io::path_t> m_pluginPaths;
 };
 }

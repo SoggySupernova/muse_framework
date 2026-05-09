@@ -23,17 +23,17 @@
 #include "registeraudiopluginsscenario.h"
 
 #include <QCoreApplication>
-#include <set>
+#include <algorithm>
+#include <map>
+#include <vector>
 
 #include "global/translation.h"
 
 #include "audiopluginserrors.h"
-#include "audiopluginsutils.h"
 
 #include "log.h"
 
 using namespace muse;
-using namespace muse::audio;
 using namespace muse::audioplugins;
 
 void RegisterAudioPluginsScenario::init()
@@ -55,45 +55,91 @@ PluginScanResult RegisterAudioPluginsScenario::scanPlugins(Progress* progress) c
     TRACEFUNC;
 
     PluginScanResult result;
-    std::set<io::path_t> scannedPaths;
 
-    for (const IAudioPluginsScannerPtr& scanner : scannerRegister()->scanners()) {
-        for (const io::path_t& path : scanner->scanPlugins(progress)) {
-            if (!knownPluginsRegister()->exists(path)) {
+    struct CacheEntry {
+        AudioResourceId id;
+        AudioPluginState state;
+    };
+    // A single binary path can host several plugin IDs (shell / multi-effect
+    // bundles), so every cached entry under a path must be tracked.
+    std::map<io::path_t, std::vector<CacheEntry> > registered;
+    for (const auto& info : knownPluginsRegister()->pluginInfoList()) {
+        registered[info.path].push_back({ info.meta.id, info.state });
+    }
+
+    for (const auto& scanner : scannerRegister()->scanners()) {
+        for (const auto& path : scanner->scanPlugins(progress)) {
+            auto it = registered.find(path);
+            if (it == registered.end()) {
                 result.newPluginPaths.push_back(path);
+                continue;
             }
 
-            scannedPaths.insert(path);
+            const std::vector<CacheEntry>& entries = it->second;
+
+            // A Discovered placeholder means a prior run was interrupted
+            // before this path finished validating — re-validate the path.
+            const bool hasDiscovered = std::any_of(entries.cbegin(), entries.cend(),
+                                                   [](const CacheEntry& e) {
+                return e.state == AudioPluginState::Discovered;
+            });
+            if (hasDiscovered) {
+                result.newPluginPaths.push_back(path);
+                registered.erase(it);
+                continue;
+            }
+
+            // Every formerly Missing ID under this path is rediscovered.
+            for (const CacheEntry& entry : entries) {
+                if (entry.state == AudioPluginState::Missing) {
+                    result.rediscoveredPluginIds.push_back(entry.id);
+                }
+            }
+            registered.erase(it);
         }
     }
 
-    for (const AudioPluginInfo& info : knownPluginsRegister()->pluginInfoList()) {
-        if (!muse::contains(scannedPaths, info.path)) {
-            result.missingPluginIds.push_back(info.meta.id);
+    // Paths no scanner reports anymore: every entry under them is missing.
+    for (const auto& [path, entries] : registered) {
+        for (const CacheEntry& entry : entries) {
+            // Skip entries already Missing — only transitions need a state change.
+            if (entry.state != AudioPluginState::Missing) {
+                result.missingPluginIds.push_back(entry.id);
+            }
         }
     }
 
     return result;
 }
 
-void RegisterAudioPluginsScenario::updatePluginsRegistry()
+Ret RegisterAudioPluginsScenario::updatePluginsRegistry()
 {
     TRACEFUNC;
 
-    const PluginScanResult result = scanPlugins();
+    PluginScanResult result = scanPlugins();
 
-    Ret ret = unregisterRemovedPlugins(result.missingPluginIds);
+    Ret ret = knownPluginsRegister()->setPluginsState(result.missingPluginIds, AudioPluginState::Missing);
     if (!ret) {
-        LOGE() << "Failed to unregister plugins: " << ret.toString();
+        LOGE() << "Failed to mark missing plugins: " << ret.toString();
+        return ret;
     }
 
-    ret = registerNewPlugins(result.newPluginPaths);
+    ret = knownPluginsRegister()->setPluginsState(result.rediscoveredPluginIds, AudioPluginState::Validated);
     if (!ret) {
-        LOGE() << "Failed to register plugins: " << ret.toString();
+        LOGE() << "Failed to mark rediscovered plugins: " << ret.toString();
+        return ret;
     }
+
+    ret = registerNewPlugins(result.newPluginPaths, /*validate*/ true);
+    if (!ret) {
+        LOGE() << "Failed to register new plugins: " << ret.toString();
+        return ret;
+    }
+
+    return knownPluginsRegister()->load();
 }
 
-Ret RegisterAudioPluginsScenario::registerNewPlugins(const io::paths_t& pluginPaths)
+Ret RegisterAudioPluginsScenario::registerNewPlugins(const io::paths_t& pluginPaths, bool validate)
 {
     TRACEFUNC;
 
@@ -101,11 +147,44 @@ Ret RegisterAudioPluginsScenario::registerNewPlugins(const io::paths_t& pluginPa
         return make_ok();
     }
 
-    processPluginsRegistration(pluginPaths);
+    Ret ret = persistDiscoveredPlaceholders(pluginPaths);
+    if (!ret) {
+        return ret;
+    }
+
+    if (validate) {
+        processPluginsRegistration(pluginPaths);
+    }
+
     return knownPluginsRegister()->load();
 }
 
-Ret RegisterAudioPluginsScenario::unregisterRemovedPlugins(const audio::AudioResourceIdList& pluginIds)
+Ret RegisterAudioPluginsScenario::persistDiscoveredPlaceholders(const io::paths_t& pluginPaths)
+{
+    // Persist Discovered placeholders so scanPlugins() can re-validate them
+    // on the next launch — if the subprocess crashes mid-scan, or if the
+    // caller passed validate=false to defer validation. Clear any prior entry
+    // at the path first to avoid the same-id-same-path assertion when
+    // auto-resuming an interrupted run.
+    AudioPluginInfoList placeholders;
+    placeholders.reserve(pluginPaths.size());
+    for (const io::path_t& path : pluginPaths) {
+        Ret ret = knownPluginsRegister()->removePluginsAtPath(path);
+        if (!ret) {
+            return ret;
+        }
+
+        AudioPluginInfo info;
+        info.meta.id = io::completeBasename(path).toStdString();
+        info.meta.type = metaType(path);
+        info.path = path;
+        info.state = AudioPluginState::Discovered;
+        placeholders.emplace_back(std::move(info));
+    }
+    return knownPluginsRegister()->registerPlugins(placeholders);
+}
+
+Ret RegisterAudioPluginsScenario::unregisterRemovedPlugins(const AudioResourceIdList& pluginIds)
 {
     TRACEFUNC;
 
@@ -113,7 +192,12 @@ Ret RegisterAudioPluginsScenario::unregisterRemovedPlugins(const audio::AudioRes
         return make_ok();
     }
 
-    return knownPluginsRegister()->unregisterPlugins(pluginIds);
+    Ret ret = knownPluginsRegister()->unregisterPlugins(pluginIds);
+    if (!ret) {
+        LOGE() << "Failed to unregister removed plugins: " << ret.toString();
+    }
+
+    return ret;
 }
 
 void RegisterAudioPluginsScenario::processPluginsRegistration(const io::paths_t& pluginPaths)
@@ -123,8 +207,8 @@ void RegisterAudioPluginsScenario::processPluginsRegistration(const io::paths_t&
     m_aborted = false;
     m_progress.start();
 
-    const std::string appPath = globalConfiguration()->appBinPath().toStdString();
-    const int64_t pluginCount = static_cast<int64_t>(pluginPaths.size());
+    std::string appPath = globalConfiguration()->appBinPath().toStdString();
+    int64_t pluginCount = static_cast<int64_t>(pluginPaths.size());
 
     for (int64_t i = 0; i < pluginCount; ++i) {
         if (m_aborted) {
@@ -132,11 +216,16 @@ void RegisterAudioPluginsScenario::processPluginsRegistration(const io::paths_t&
         }
 
         const io::path_t& pluginPath = pluginPaths[i];
-        const std::string pluginPathStr = pluginPath.toStdString();
+        std::string pluginPathStr = pluginPath.toStdString();
 
         m_progress.progress(i, pluginCount, io::filename(pluginPath).toStdString());
         qApp->processEvents();
 
+        // The subprocess clears its own Discovered placeholder via
+        // registerPlugin / registerFailedPlugin. Removing it here would
+        // operate on the main process's stale in-memory register and
+        // clobber the entries previous subprocesses already wrote.
+        LOGD() << "--register-audio-plugin " << pluginPathStr;
         int code = process()->execute(appPath, { "--register-audio-plugin", pluginPathStr });
         if (code != 0) {
             code = process()->execute(appPath, { "--register-failed-audio-plugin", pluginPathStr, "--", std::to_string(code) });
@@ -158,6 +247,17 @@ Ret RegisterAudioPluginsScenario::registerPlugin(const io::path_t& pluginPath)
         return false;
     }
 
+    // Clear any prior Discovered placeholder at this path so the real
+    // validated metadata can be registered without tripping the
+    // same-id-same-path guard in registerPlugins(). Subprocess-side: the
+    // process just load()ed, so the register reflects what's on disk.
+    Ret ret = knownPluginsRegister()->removePluginsAtPath(pluginPath);
+    if (!ret) {
+        LOGE() << "Failed to clear existing entry at " << pluginPath.toStdString()
+               << ": " << ret.toString();
+        return ret;
+    }
+
     const IAudioPluginMetaReaderPtr reader = metaReader(pluginPath);
     if (!reader) {
         return make_ret(Err::UnknownPluginType);
@@ -174,15 +274,13 @@ Ret RegisterAudioPluginsScenario::registerPlugin(const io::path_t& pluginPath)
 
     for (const AudioResourceMeta& meta : metaList.val) {
         AudioPluginInfo info;
-        info.type = audioPluginTypeFromCategoriesString(meta.attributeVal(audio::CATEGORIES_ATTRIBUTE));
         info.meta = meta;
         info.path = pluginPath;
-        info.enabled = true;
+        info.state = AudioPluginState::Validated;
         infoList.emplace_back(std::move(info));
     }
 
-    Ret ret = knownPluginsRegister()->registerPlugins(infoList);
-    return ret;
+    return knownPluginsRegister()->registerPlugins(infoList);
 }
 
 Ret RegisterAudioPluginsScenario::registerFailedPlugin(const io::path_t& pluginPath, int failCode)
@@ -193,15 +291,24 @@ Ret RegisterAudioPluginsScenario::registerFailedPlugin(const io::path_t& pluginP
         return false;
     }
 
+    // Same reason as registerPlugin: the failed entry uses the basename as
+    // its id (matching the Discovered placeholder), so the placeholder must
+    // be cleared first to avoid the same-id-same-path guard.
+    Ret ret = knownPluginsRegister()->removePluginsAtPath(pluginPath);
+    if (!ret) {
+        LOGE() << "Failed to clear existing entry at " << pluginPath.toStdString()
+               << ": " << ret.toString();
+        return ret;
+    }
+
     AudioPluginInfo info;
     info.meta.id = io::completeBasename(pluginPath).toStdString();
     info.meta.type = metaType(pluginPath);
     info.path = pluginPath;
-    info.enabled = false;
+    info.state = AudioPluginState::Error;
     info.errorCode = failCode;
 
-    Ret ret = knownPluginsRegister()->registerPlugins({ info });
-    return ret;
+    return knownPluginsRegister()->registerPlugins({ info });
 }
 
 IAudioPluginMetaReaderPtr RegisterAudioPluginsScenario::metaReader(const io::path_t& pluginPath) const
@@ -215,8 +322,8 @@ IAudioPluginMetaReaderPtr RegisterAudioPluginsScenario::metaReader(const io::pat
     return nullptr;
 }
 
-audio::AudioResourceType RegisterAudioPluginsScenario::metaType(const io::path_t& pluginPath) const
+audioplugins::AudioResourceType RegisterAudioPluginsScenario::metaType(const io::path_t& pluginPath) const
 {
     const IAudioPluginMetaReaderPtr reader = metaReader(pluginPath);
-    return reader ? reader->metaType() : audio::AudioResourceType::Undefined;
+    return reader ? reader->metaType() : audioplugins::AudioResourceType();
 }

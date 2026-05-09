@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  * MuseScore-CLA-applies
  *
- * MuseScore Studio
+ * MuseScore
  * Music Composition & Notation
  *
- * Copyright (C) 2021 MuseScore Limited and others
+ * Copyright (C) 2026 MuseScore Limited and others
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -21,25 +21,26 @@
  */
 #pragma once
 
+#include <functional>
+
 #include "modularity/imoduleinterface.h"
 
-#include "global/io/path.h"
-
-#include "audiopluginstypes.h"
+#include "global/serialization/json.h"
+#include "global/types/ret.h"
 
 namespace muse::audioplugins {
-class IAudioPluginsConfiguration : MODULE_GLOBAL_INTERFACE
+inline constexpr int CURRENT_KNOWN_AUDIO_PLUGINS_VERSION = 3;
+
+class IKnownAudioPluginsMigrationRegister : MODULE_GLOBAL_INTERFACE
 {
-    INTERFACE_ID(IAudioPluginsConfiguration)
+    INTERFACE_ID(IKnownAudioPluginsMigrationRegister)
 
 public:
-    virtual ~IAudioPluginsConfiguration() = default;
+    virtual ~IKnownAudioPluginsMigrationRegister() = default;
 
-    virtual io::path_t knownAudioPluginsFilePath() const = 0;
+    using PluginsMigration = std::function<JsonArray (const JsonArray&)>;
 
-    // Attributes the framework treats as runtime-only: skipped on save,
-    // re-injected on load. Apps register their own (e.g. playbackSetupData).
-    virtual const AudioResourceAttributes& runtimeAttributeDefaults() const = 0;
-    virtual void setRuntimeAttributeDefaults(const AudioResourceAttributes& defaults) = 0;
+    virtual void registerMigration(int fromVersion, PluginsMigration cb) = 0;
+    virtual Ret migrate(int fromVersion, int toVersion, JsonArray& plugins) const = 0;
 };
 }

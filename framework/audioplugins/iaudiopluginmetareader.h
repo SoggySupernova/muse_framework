@@ -24,7 +24,7 @@
 
 #include "global/types/retval.h"
 #include "global/io/path.h"
-#include "audio/common/audiotypes.h"
+#include "audiopluginstypes.h"
 
 namespace muse::audioplugins {
 class IAudioPluginMetaReader
@@ -32,9 +32,9 @@ class IAudioPluginMetaReader
 public:
     virtual ~IAudioPluginMetaReader() = default;
 
-    virtual audio::AudioResourceType metaType() const = 0;
+    virtual AudioResourceType metaType() const = 0;
     virtual bool canReadMeta(const io::path_t& pluginPath) const = 0;
-    virtual RetVal<audio::AudioResourceMetaList> readMeta(const io::path_t& pluginPath) const = 0;
+    virtual RetVal<AudioResourceMetaList> readMeta(const io::path_t& pluginPath) const = 0;
 };
 
 using IAudioPluginMetaReaderPtr = std::shared_ptr<IAudioPluginMetaReader>;

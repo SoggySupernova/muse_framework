@@ -5,7 +5,7 @@
  * MuseScore Studio
  * Music Composition & Notation
  *
- * Copyright (C) 2021 MuseScore Limited and others
+ * Copyright (C) 2026 MuseScore Limited and others
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -21,25 +21,20 @@
  */
 #pragma once
 
-#include "modularity/imoduleinterface.h"
+#include <map>
 
-#include "global/io/path.h"
-
-#include "audiopluginstypes.h"
+#include "../iknownaudiopluginsmigrationregister.h"
 
 namespace muse::audioplugins {
-class IAudioPluginsConfiguration : MODULE_GLOBAL_INTERFACE
+class KnownAudioPluginsMigrationRegister : public IKnownAudioPluginsMigrationRegister
 {
-    INTERFACE_ID(IAudioPluginsConfiguration)
-
 public:
-    virtual ~IAudioPluginsConfiguration() = default;
+    KnownAudioPluginsMigrationRegister();
 
-    virtual io::path_t knownAudioPluginsFilePath() const = 0;
+    void registerMigration(int fromVersion, PluginsMigration cb) override;
+    Ret migrate(int fromVersion, int toVersion, JsonArray& plugins) const override;
 
-    // Attributes the framework treats as runtime-only: skipped on save,
-    // re-injected on load. Apps register their own (e.g. playbackSetupData).
-    virtual const AudioResourceAttributes& runtimeAttributeDefaults() const = 0;
-    virtual void setRuntimeAttributeDefaults(const AudioResourceAttributes& defaults) = 0;
+private:
+    std::map<int, PluginsMigration> m_migrations;
 };
 }

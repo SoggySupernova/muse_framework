@@ -22,18 +22,21 @@
 
 #include "vstpluginmetareader.h"
 
+#include "audio/common/audiotypes.h"
+
 #include "vsttypes.h"
+#include "vstpluginattrs.h"
 #include "vsterrors.h"
 
 #include "log.h"
 
 using namespace muse;
-using namespace muse::audio;
+using namespace muse::audioplugins;
 using namespace muse::vst;
 
-audio::AudioResourceType VstPluginMetaReader::metaType() const
+audioplugins::AudioResourceType VstPluginMetaReader::metaType() const
 {
-    return audio::AudioResourceType::VstPlugin;
+    return std::string(AUDIO_RESOURCE_TYPE_NAME);
 }
 
 bool VstPluginMetaReader::canReadMeta(const io::path_t& pluginPath) const
@@ -56,12 +59,12 @@ RetVal<AudioResourceMetaList> VstPluginMetaReader::readMeta(const io::path_t& pl
             continue;
         }
 
-        muse::audio::AudioResourceMeta meta;
+        AudioResourceMeta meta;
         meta.id = io::completeBasename(pluginPath).toStdString();
-        meta.type = muse::audio::AudioResourceType::VstPlugin;
-        meta.attributes.emplace(muse::audio::CATEGORIES_ATTRIBUTE, String::fromStdString(classInfo.subCategoriesString()));
+        meta.type = AUDIO_RESOURCE_TYPE_NAME;
+        meta.attributes.emplace(CATEGORIES_ATTRIBUTE, String::fromStdString(classInfo.subCategoriesString()));
+        meta.attributes.emplace(muse::audio::HAS_NATIVE_EDITOR_SUPPORT_ATTRIBUTE, u"true");
         meta.vendor = classInfo.vendor();
-        meta.hasNativeEditorSupport = true;
 
         result.emplace_back(std::move(meta));
         break;
