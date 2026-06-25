@@ -24,6 +24,8 @@
 
 #include "apitypes.h"
 
+#include "engraving/playback/humanizer.h"
+
 using namespace muse;
 using namespace muse::musesampler;
 using namespace muse::mpe;
@@ -291,7 +293,7 @@ void MuseSamplerSequencer::loadDynamicEvents(const DynamicLevelLayers& changes)
         }
     }
 }
-
+bool m_prevWasSlurred = false;
 void MuseSamplerSequencer::addNoteEvent(const mpe::NoteEvent& noteEvent)
 {
     IF_ASSERT_FAILED(m_samplerLib && m_sampler && m_tracks) {
@@ -331,8 +333,36 @@ void MuseSamplerSequencer::addNoteEvent(const mpe::NoteEvent& noteEvent)
     event._duration_us = arrangementCtx.nominalDuration;
     event._tempo = arrangementCtx.bps * 60.0; // API expects BPM
 
+
+    
+
+    auto& h = humanizer::Humanizer::instance();
+    h.loadConfig("~/.config/MuseScore/humanizer.json");
+
+
+
+
+
+
+    // always nudge tuning slightly, it's less destructive
+    event._offset_cents = h.nudgeCents(event._offset_cents);
+
     pitchAndTuning(noteEvent.pitchCtx().nominalPitchLevel, event._pitch, event._offset_cents);
     parseArticulations(articulations, event._articulation, event._articulation_2, event._notehead);
+
+    // now add humanization here, AFTER parseArticulations:
+    bool isSlurred = event._articulation & ms_NoteArticulation_Slur;
+    bool isTremolo = (event._articulation & ms_NoteArticulation_Tremolo1) ||
+                    (event._articulation & ms_NoteArticulation_Tremolo2) ||
+                    (event._articulation & ms_NoteArticulation_Tremolo3);
+
+    // todo: last note of a slur is not detected as a slur
+
+    if (!isSlurred && !isTremolo) {
+        event._location_us = std::max(0LL, h.nudgeTimestampUs(event._location_us, event._duration_us));
+        event._duration_us = std::max(1LL, h.nudgeDurationUs(event._duration_us));
+    }
+    event._offset_cents = h.nudgeCents(event._offset_cents);
 
     long long noteEventId = 0;
     if (!m_samplerLib->addNoteEvent(m_sampler, track, event, noteEventId)) {
