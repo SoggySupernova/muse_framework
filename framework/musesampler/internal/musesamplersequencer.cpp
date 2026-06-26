@@ -337,7 +337,6 @@ void MuseSamplerSequencer::addNoteEvent(const mpe::NoteEvent& noteEvent)
     
 
     auto& h = humanizer::Humanizer::instance();
-    h.loadConfig("~/.config/MuseScore/humanizer.json");
 
 
 
