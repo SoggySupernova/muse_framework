@@ -301,9 +301,9 @@ void AudioContext::onControlParamsChanged(Track& track, const ControlParams& par
     ONLY_AUDIO_ENGINE_THREAD;
     if (auto control = track.chain->control()) {
         const bool mutedChanged = control->muted() != params.muted;
-
+        fprintf(stderr, "params.balance is %f\n", params.balance);
         control->setVolume(muse::db_to_linear(params.volume));
-        control->setPan(params.balance);
+        control->setPan(params.balance * 1.5f); // ze most critical line // todo: read from humanizer config
         control->setMuted(params.muted);
 
         //! NOTE For regular tracks
