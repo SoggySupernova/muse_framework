@@ -171,7 +171,7 @@ TEST_F(Draw_FontsProviderQtTests, lineSpacing)
     }
 }
 
-TEST_F(Draw_FontsProviderQtTests, DISABLED_xHeight)
+TEST_F(Draw_FontsProviderQtTests, xHeight)
 {
     Env env;
     Font f(u"Edwin", Font::Type::Text);
@@ -187,7 +187,7 @@ TEST_F(Draw_FontsProviderQtTests, DISABLED_xHeight)
     }
 }
 
-TEST_F(Draw_FontsProviderQtTests, DISABLED_height)
+TEST_F(Draw_FontsProviderQtTests, height)
 {
     Env env;
     Font f(u"Edwin", Font::Type::Text);
@@ -203,7 +203,7 @@ TEST_F(Draw_FontsProviderQtTests, DISABLED_height)
     }
 }
 
-TEST_F(Draw_FontsProviderQtTests, DISABLED_ascent)
+TEST_F(Draw_FontsProviderQtTests, ascent)
 {
     Env env;
     Font f(u"Edwin", Font::Type::Text);
@@ -219,7 +219,7 @@ TEST_F(Draw_FontsProviderQtTests, DISABLED_ascent)
     }
 }
 
-TEST_F(Draw_FontsProviderQtTests, DISABLED_descent)
+TEST_F(Draw_FontsProviderQtTests, descent)
 {
     Env env;
     Font f(u"Edwin", Font::Type::Text);
