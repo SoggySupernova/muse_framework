@@ -197,16 +197,15 @@ void UriQuery::parseParams(const std::string& uri, Params& out) const
     strings::split(paramsStr, paramsPairs, "&");
 
     for (const std::string& pair : paramsPairs) {
-        std::vector<std::string> param;
-        strings::split(pair, param, "=");
-        if (param.size() != 2) {
+        size_t eqPos = pair.find('=');
+        if (eqPos == std::string::npos) {
             LOGE() << "Invalid param: " << pair << ", in uri: " << uri;
             continue;
         }
-        std::string key = param.at(0);
+        std::string key = pair.substr(0, eqPos);
         strings::trim(key);
 
-        std::string val = param.at(1);
+        std::string val = pair.substr(eqPos + 1);
 
         //! NOTE Val is bool?
         if (URI_VAL_TRUE == val || URI_VAL_FALSE == val) {
