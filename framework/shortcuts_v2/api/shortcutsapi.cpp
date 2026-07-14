@@ -19,27 +19,19 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MUSE_UI_NAVIGATIONUIACTIONS_H
-#define MUSE_UI_NAVIGATIONUIACTIONS_H
+#include "shortcutsapi.h"
 
-#include "../iuiactionsmodule.h"
+#include "log.h"
 
-namespace muse::ui {
-class NavigationUiActions : public IUiActionsModule
+using namespace muse::api;
+
+ShortcutsApi::ShortcutsApi(api::IApiEngine* e)
+    : api::ApiObject(e)
 {
-public:
-    NavigationUiActions() = default;
-
-    const UiActionList& actionsList() const override;
-    bool actionEnabled(const UiAction& act) const override;
-    async::Channel<actions::ActionCodeList> actionEnabledChanged() const override;
-
-    bool actionChecked(const UiAction& act) const override;
-    async::Channel<actions::ActionCodeList> actionCheckedChanged() const override;
-
-private:
-    static const UiActionList m_actions;
-};
 }
 
-#endif // MUSE_UI_NAVIGATIONUIACTIONS_H
+void ShortcutsApi::activate(const QString& sequence)
+{
+    TRACEFUNC;
+    shortcutsController()->activate(sequence.toStdString());
+}

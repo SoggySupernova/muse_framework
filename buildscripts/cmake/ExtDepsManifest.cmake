@@ -5,6 +5,7 @@ if (MUSE_MODULE_VST)
 endif()
 
 if (MUSE_MODULE_DRAW)
+    require_dep(libpng)
     require_dep(freetype)
     require_dep(harfbuzz)
 endif()
@@ -24,6 +25,10 @@ if (MUSE_MODULE_AUDIO AND MUSE_MODULE_AUDIO_EXPORT)
     require_dep(lame)
     require_dep(opus)
     require_dep(opusenc)
+endif()
+
+if (MUSE_MODULE_AUDIO AND MUSE_MODULE_AUDIO_PIPEWIRE)
+    require_dep(pipewire)
 endif()
 
 require_source_dep(picojson)

@@ -36,6 +36,7 @@ option(MUSE_MODULE_AUDIO_EXPORT "Enable audio export" ON)
 set(MUSE_MODULE_AUDIO_WORKMODE 3 CACHE STRING "Audio subsystem work mode")
 
 declare_muse_module_opt(AUDIOPLUGINS ON)
+option(MUSE_MODULE_AUDIOPLUGINS_SCAN_TRACE "Enable audio plugin scan logging" OFF)
 
 declare_muse_module_opt(AUTOMATION ON)
 
@@ -83,6 +84,8 @@ declare_muse_module_opt(RCOMMAND ON)
 declare_muse_module_opt(RCONTROL ON)
 
 declare_muse_module_opt(SHORTCUTS ON)
+option(MUSE_MODULE_SHORTCUTS_V2 "Use shortcuts v2" OFF)
+
 declare_muse_module_opt(TESTFLOW ON)
 declare_muse_module_opt(TOURS ON)
 
