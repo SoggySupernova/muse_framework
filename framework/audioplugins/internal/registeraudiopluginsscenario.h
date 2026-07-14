@@ -57,6 +57,8 @@ public:
     PluginScanResult scanPlugins(Progress* progress = nullptr) const override;
 
     Ret updatePluginsRegistry() override;
+    Ret rescanAllPlugins() override;
+
     Ret registerNewPlugins(const io::paths_t& pluginPaths, bool validate) override;
     Ret unregisterRemovedPlugins(const PluginResourceIdList& pluginIds) override;
 

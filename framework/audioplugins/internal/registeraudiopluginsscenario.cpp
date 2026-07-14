@@ -152,6 +152,19 @@ PluginScanResult RegisterAudioPluginsScenario::scanPlugins(Progress* progress) c
     return result;
 }
 
+Ret RegisterAudioPluginsScenario::rescanAllPlugins()
+{
+    TRACEFUNC;
+
+    Ret ret = knownPluginsRegister()->clear();
+    if (!ret) {
+        LOGE() << "Failed to clear plugins registry: " << ret.toString();
+        return ret;
+    }
+
+    return updatePluginsRegistry();
+}
+
 Ret RegisterAudioPluginsScenario::updatePluginsRegistry()
 {
     TRACEFUNC;

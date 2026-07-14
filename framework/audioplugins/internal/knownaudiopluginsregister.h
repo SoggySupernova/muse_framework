@@ -45,6 +45,7 @@ public:
     KnownAudioPluginsRegister() = default;
 
     Ret load() override;
+    Ret clear() override;
 
     AudioPluginInfoList pluginInfoList(PluginInfoAccepted accepted = PluginInfoAccepted()) const override;
     muse::async::Notification pluginInfoListChanged() const override;

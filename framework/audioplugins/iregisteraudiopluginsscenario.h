@@ -45,6 +45,8 @@ public:
     virtual PluginScanResult scanPlugins(Progress* progress = nullptr) const = 0;
 
     virtual Ret updatePluginsRegistry() = 0;
+    virtual Ret rescanAllPlugins() = 0;
+
     // validate=false only persists Discovered placeholders, to be validated on the next scan
     virtual Ret registerNewPlugins(const io::paths_t& pluginPaths, bool validate = true) = 0;
     virtual Ret unregisterRemovedPlugins(const PluginResourceIdList& pluginIds) = 0;
